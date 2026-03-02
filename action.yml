@@ -107,8 +107,16 @@ runs:
       shell: bash
       run: |
         INSTALL_DIR="$HOME/.strucpp"
-        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
-        echo "path=$INSTALL_DIR" >> "$GITHUB_OUTPUT"
+
+        # Convert to native path on Windows so PowerShell can resolve it
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          NATIVE_PATH="$(cygpath -w "$INSTALL_DIR")"
+        else
+          NATIVE_PATH="$INSTALL_DIR"
+        fi
+
+        echo "$NATIVE_PATH" >> "$GITHUB_PATH"
+        echo "path=$NATIVE_PATH" >> "$GITHUB_OUTPUT"
 
         # Verify installation
         "$INSTALL_DIR/strucpp" --version
