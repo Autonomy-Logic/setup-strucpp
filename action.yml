@@ -1,0 +1,115 @@
+name: 'Setup STruC++'
+description: 'Download and configure STruC++ (IEC 61131-3 Structured Text to C++ compiler)'
+branding:
+  icon: 'cpu'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'STruC++ version to install (e.g., "0.1.4"). Default: latest release.'
+    required: false
+    default: 'latest'
+  token:
+    description: 'GitHub token for downloading releases.'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: 'Installed STruC++ version'
+    value: ${{ steps.version.outputs.version }}
+  path:
+    description: 'Path to STruC++ installation directory'
+    value: ${{ steps.setup.outputs.path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine version
+      id: version
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          VERSION=$(gh release view --repo Autonomy-Logic/STruCpp --json tagName -q '.tagName' | sed 's/^v//')
+        else
+          VERSION="${{ inputs.version }}"
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Installing STruC++ v${VERSION}"
+
+    - name: Determine platform asset
+      id: platform
+      shell: bash
+      run: |
+        OS="${{ runner.os }}"
+        ARCH="${{ runner.arch }}"
+
+        case "${OS}-${ARCH}" in
+          Linux-X64)     ASSET="strucpp-linux-x64.tar.gz" ;;
+          Linux-ARM64)   ASSET="strucpp-linux-arm64.tar.gz" ;;
+          macOS-X64)     ASSET="strucpp-darwin-x64.zip" ;;
+          macOS-ARM64)   ASSET="strucpp-darwin-arm64.zip" ;;
+          Windows-X64)   ASSET="strucpp-win32-x64.zip" ;;
+          Windows-ARM64) ASSET="strucpp-win32-arm64.zip" ;;
+          *) echo "::error::Unsupported platform: ${OS}-${ARCH}" && exit 1 ;;
+        esac
+
+        echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+    - name: Cache STruC++
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.strucpp
+        key: strucpp-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
+
+    - name: Download and install
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        ASSET="${{ steps.platform.outputs.asset }}"
+        INSTALL_DIR="$HOME/.strucpp"
+
+        mkdir -p "$INSTALL_DIR" /tmp/strucpp-dl
+
+        echo "Downloading STruC++ v${VERSION} (${ASSET})..."
+        gh release download "v${VERSION}" \
+          --repo Autonomy-Logic/STruCpp \
+          --pattern "$ASSET" \
+          --dir /tmp/strucpp-dl
+
+        # Extract based on archive type
+        cd /tmp/strucpp-dl
+        if [[ "$ASSET" == *.tar.gz ]]; then
+          tar xzf "$ASSET"
+        else
+          unzip -q "$ASSET"
+        fi
+
+        # Move contents from strucpp/ subdirectory to install dir
+        cp -r strucpp/* "$INSTALL_DIR/"
+
+        # Ensure binary is executable
+        if [ -f "$INSTALL_DIR/strucpp" ]; then
+          chmod +x "$INSTALL_DIR/strucpp"
+        fi
+
+        # Cleanup
+        rm -rf /tmp/strucpp-dl
+
+    - name: Add to PATH and verify
+      id: setup
+      shell: bash
+      run: |
+        INSTALL_DIR="$HOME/.strucpp"
+        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+        echo "path=$INSTALL_DIR" >> "$GITHUB_OUTPUT"
+
+        # Verify installation
+        "$INSTALL_DIR/strucpp" --version
+        echo "STruC++ v${{ steps.version.outputs.version }} ready"
